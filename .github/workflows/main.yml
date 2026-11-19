@@ -1,0 +1,243 @@
+name: Build SA-MP 2.10 Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+
+    env:
+      ANDROID_PLATFORM: android-37.0
+      ANDROID_BUILD_TOOLS: 36.0.0
+      ANDROID_NDK_VERSION: 26.2.11394342
+      ANDROID_CMAKE_VERSION: 3.22.1
+
+    steps:
+
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      # ============================================================
+      # 2. GRADLE WRAPPER
+      # ============================================================
+      - name: Prepare Gradle wrapper
+        shell: bash
+        run: |
+          set -e
+
+          chmod +x ./gradlew
+
+          echo "===== GRADLEW ====="
+          ls -l ./gradlew
+
+          test -x ./gradlew
+
+      # ============================================================
+      # 3. JAVA 17
+      # ============================================================
+      - name: Setup JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      # ============================================================
+      # 4. ANDROID SDK
+      # ============================================================
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      # ============================================================
+      # 5. INSTALAR COMPONENTES ANDROID
+      # ============================================================
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          set -e
+
+          echo "===== ACCEPT LICENSES ====="
+          yes | sdkmanager --licenses >/dev/null || true
+
+          echo "===== INSTALL COMPONENTS ====="
+
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "ndk;${ANDROID_NDK_VERSION}" \
+            "cmake;${ANDROID_CMAKE_VERSION}"
+
+      # ============================================================
+      # 6. CONFIGURAR AMBIENTE
+      # ============================================================
+      - name: Configure Android environment
+        shell: bash
+        run: |
+          set -e
+
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
+
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+          echo "${ANDROID_SDK_ROOT}/platform-tools" >> "$GITHUB_PATH"
+          echo "${ANDROID_SDK_ROOT}/cmake/${ANDROID_CMAKE_VERSION}/bin" >> "$GITHUB_PATH"
+          echo "${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+
+      # ============================================================
+      # 7. LOCAL.PROPERTIES
+      # ============================================================
+      - name: Configure local.properties
+        shell: bash
+        run: |
+          set -e
+
+          echo "sdk.dir=${ANDROID_SDK_ROOT}" > local.properties
+
+          echo "===== local.properties ====="
+          cat local.properties
+
+          test -f local.properties
+
+      # ============================================================
+      # 8. VERIFICAR AMBIENTE
+      # ============================================================
+      - name: Verify build environment
+        shell: bash
+        run: |
+          set -e
+
+          echo ""
+          echo "========================================"
+          echo "JAVA"
+          echo "========================================"
+          java -version
+
+          echo ""
+          echo "========================================"
+          echo "GRADLE"
+          echo "========================================"
+          ./gradlew --version
+
+          echo ""
+          echo "========================================"
+          echo "CMAKE"
+          echo "========================================"
+          cmake --version
+
+          echo ""
+          echo "========================================"
+          echo "NINJA"
+          echo "========================================"
+          ninja --version
+
+          echo ""
+          echo "========================================"
+          echo "ANDROID SDK"
+          echo "========================================"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
+
+          sdkmanager --list_installed 2>/dev/null | grep -E \
+            "platforms;android-37.0|build-tools;36.0.0|ndk;26.2.11394342|cmake;3.22.1" \
+            || true
+
+          echo ""
+          echo "========================================"
+          echo "NDK"
+          echo "========================================"
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}"
+
+          test -d "${ANDROID_NDK_HOME}"
+
+          echo ""
+          echo "========================================"
+          echo "NDK CLANG"
+          echo "========================================"
+
+          "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version
+
+          echo ""
+          echo "========================================"
+          echo "NDK TOOLCHAIN CHECK"
+          echo "========================================"
+
+          test -x \
+            "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+
+          test -x \
+            "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+
+          test -x \
+            "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/ld.lld"
+
+          echo "clang: OK"
+          echo "clang++: OK"
+          echo "ld.lld: OK"
+
+      # ============================================================
+      # 9. LIMPAR BUILD
+      # ============================================================
+      - name: Clean
+        shell: bash
+        run: |
+          set -e
+
+          ./gradlew clean \
+            --no-daemon \
+            --stacktrace
+
+      # ============================================================
+      # 10. BUILD DEBUG
+      # ============================================================
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          set -e
+
+          ./gradlew assembleDebug \
+            --info \
+            --warning-mode all
+      # ============================================================
+      # 11. LOCALIZAR APK
+      # ============================================================
+      - name: Find APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "APK FILES"
+          echo "========================================"
+
+          find app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            -print
+
+      # ============================================================
+      # 12. UPLOAD APK
+      # ============================================================
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: samp-2.10-debug
+          path: |
+            app/build/outputs/apk/**/*.apk
+            app/build/outputs/apk/*.apk
+          if-no-files-found: error
+          retention-days: 7
