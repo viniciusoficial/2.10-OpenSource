@@ -131,6 +131,7 @@ public class CustomKeyboard {
                         OnInputEnd(str);
                     }
 
+                    return true;
                 }
                 return false;
             }

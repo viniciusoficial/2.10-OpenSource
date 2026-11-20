@@ -1,5 +1,38 @@
 #include "jniutil.h"
 #include "game/game.h"
+
+namespace
+{
+	JNIEnv* GetJniEnv(bool& attached)
+	{
+		attached = false;
+		JNIEnv* env = nullptr;
+		jint status = javaVM->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+		if (status == JNI_EDETACHED)
+		{
+			if (javaVM->AttachCurrentThread(&env, nullptr) != JNI_OK)
+				return nullptr;
+			attached = true;
+		}
+		else if (status != JNI_OK)
+		{
+			return nullptr;
+		}
+		return env;
+	}
+
+	void ReleaseJniEnv(JNIEnv* env, bool attached)
+	{
+		if (env->ExceptionCheck())
+		{
+			env->ExceptionDescribe();
+			env->ExceptionClear();
+		}
+		if (attached)
+			javaVM->DetachCurrentThread();
+	}
+}
+
 extern CGame *pGame;
 
 CJavaWrapper::CJavaWrapper(JNIEnv *env, jobject activity)
@@ -27,6 +60,8 @@ CJavaWrapper::CJavaWrapper(JNIEnv *env, jobject activity)
 
 	s_showInputLayout = env->GetMethodID(clas, "showKeyboard", "()V");
     s_hideInputLayout = env->GetMethodID(clas, "hideKeyboard", "()V");
+	s_showPCInputConfig = env->GetMethodID(clas, "showPCInputConfig", "()V");
+	s_setNativeInterfaceVisible = env->GetMethodID(clas, "setNativeInterfaceVisible", "(Z)V");
 
     s_exitGame = env->GetMethodID(clas, "exitGame", "()V");
 
@@ -50,6 +85,34 @@ void CJavaWrapper::HideKeyboard()
     javaVM->GetEnv((void**)&p, JNI_VERSION_1_6);
     p->CallVoidMethod(activity, s_hideInputLayout);
     EXCEPTION_CHECK(p);
+}
+
+void CJavaWrapper::ShowPCInputConfig()
+{
+	bool attached = false;
+	JNIEnv* env = GetJniEnv(attached);
+	if (!env || !s_showPCInputConfig)
+	{
+		FLog("Unable to invoke showPCInputConfig");
+		return;
+	}
+
+	env->CallVoidMethod(activity, s_showPCInputConfig);
+	ReleaseJniEnv(env, attached);
+}
+
+void CJavaWrapper::SetNativeInterfaceVisible(bool visible)
+{
+	bool attached = false;
+	JNIEnv* env = GetJniEnv(attached);
+	if (!env || !s_setNativeInterfaceVisible)
+	{
+		FLog("Unable to invoke setNativeInterfaceVisible");
+		return;
+	}
+
+	env->CallVoidMethod(activity, s_setNativeInterfaceVisible, visible ? JNI_TRUE : JNI_FALSE);
+	ReleaseJniEnv(env, attached);
 }
 
 void CJavaWrapper::ShowLoadingScreen()

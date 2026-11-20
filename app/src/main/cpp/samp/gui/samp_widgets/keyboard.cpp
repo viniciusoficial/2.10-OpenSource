@@ -1,6 +1,7 @@
 #include "../../main.h"
 #include "../gui.h"
 #include "../../game/game.h"
+#include "../../game/pad.h"
 #include "../../log.h"
 #include "../settings.h"
 #include "../java/jniutil.h"
@@ -145,8 +146,10 @@ void Keyboard::changeCase(KeyboardLayout::KeyCase key_case)
 
 void Keyboard::show(Widget* caller)
 {
-	if(pSettings->Get().iAndroidKeyboard)
+	if(pSettings->Get().iAndroidKeyboard ||
+		(IsPCInputEnabled() && IsPhysicalKeyboardAvailable()))
 	{
+		pJavaWrapper->SetNativeInterfaceVisible(true);
 		pJavaWrapper->ShowKeyboard();
 	}
 	else {
@@ -154,13 +157,15 @@ void Keyboard::show(Widget* caller)
 		m_input->clear();
 		this->setVisible(true);
 		pGame->EnableGameInput(false);
+		pJavaWrapper->SetNativeInterfaceVisible(true);
 	}
 	m_caller = caller;
 }
 
 void Keyboard::hide()
 {
-	if(pSettings->Get().iAndroidKeyboard)
+	if(pSettings->Get().iAndroidKeyboard ||
+		(IsPCInputEnabled() && IsPhysicalKeyboardAvailable()))
 	{
 		pJavaWrapper->HideKeyboard();
 	}
@@ -168,6 +173,7 @@ void Keyboard::hide()
 		this->setVisible(false);
 		pGame->EnableGameInput(true);
 	}
+	pJavaWrapper->SetNativeInterfaceVisible(false);
 	m_caller = nullptr;
 }
 
@@ -183,13 +189,11 @@ void Keyboard::send()
 
 void Keyboard::sendForGB(JNIEnv *pEnv, jobject thiz, jbyteArray str)
 {
-	std::string::size_type v8; // r0
-	v8 = pEnv->functions->GetArrayLength(pEnv, (jarray)str);
-	char* buffer = (char*)malloc(v8 + 1);
+	const jsize length = pEnv->GetArrayLength(str);
 	jbyte* elements = pEnv->GetByteArrayElements(str, NULL);
-	memcpy(buffer, elements, v8);
-	buffer[v8] = 0;
-	std::string input = std::string(buffer);
+	if (!elements)
+		return;
+	std::string input(reinterpret_cast<char*>(elements), static_cast<size_t>(length));
 	if (m_caller) m_caller->keyboardEvent(input);
 	hide();
 	pEnv->ReleaseByteArrayElements(str, elements, JNI_ABORT);

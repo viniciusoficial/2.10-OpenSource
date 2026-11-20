@@ -25,6 +25,33 @@ enum ePadKeys
 	KEY_CTRL_BACK, 			// H 			|   H 					|	262144
 };
 
+enum class PCInputAction : int
+{
+	MOVE_FORWARD,
+	MOVE_BACKWARD,
+	MOVE_LEFT,
+	MOVE_RIGHT,
+	SPRINT,
+	JUMP,
+	CROUCH,
+	ATTACK,
+	AIM,
+	ENTER_EXIT_VEHICLE,
+	HORN,
+	YES,
+	NO,
+	SCOREBOARD,
+	WALK,
+	WEAPON_PREVIOUS,
+	WEAPON_NEXT,
+	CHAT,
+	ACCEPT,
+	TOGGLE_MOUSE,
+	COUNT
+};
+
+constexpr int PC_INPUT_ACTION_COUNT = static_cast<int>(PCInputAction::COUNT);
+
 typedef struct
 {
 	uint16_t wKeyLR;
@@ -41,5 +68,12 @@ extern PAD_KEYS RemotePlayerKeys[PLAYER_PED_SLOTS];
 void SetKeyboardKeyState(int keyCode, bool isDown);
 void SetMouseButtonState(int buttonState);
 void SetMouseWheelDirection(int direction);
+void SetPCInputEnabled(bool enabled);
+void SetPhysicalKeyboardAvailable(bool available);
+void SetPCInputBinding(int action, int keyCode);
+bool IsPCInputEnabled();
+bool IsPhysicalKeyboardAvailable();
+bool IsPCInputActionDown(PCInputAction action);
+bool ConsumePCInputActionPress(PCInputAction action);
 
 void HookCPad();

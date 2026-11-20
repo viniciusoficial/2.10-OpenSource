@@ -23,6 +23,36 @@ namespace
 	std::array<std::atomic_bool, 512> g_KeyboardKeys{};
 	std::atomic_int g_MouseButtons{0};
 	std::atomic_int g_MouseWheelSteps{0};
+	std::atomic_bool g_PCInputEnabled{true};
+	std::atomic_bool g_PhysicalKeyboardAvailable{false};
+	std::array<std::atomic_int, PC_INPUT_ACTION_COUNT> g_InputBindings = {
+		AKEYCODE_W,
+		AKEYCODE_S,
+		AKEYCODE_A,
+		AKEYCODE_D,
+		AKEYCODE_SHIFT_LEFT,
+		AKEYCODE_SPACE,
+		AKEYCODE_C,
+		AKEYCODE_UNKNOWN,
+		AKEYCODE_UNKNOWN,
+		AKEYCODE_F,
+		AKEYCODE_H,
+		AKEYCODE_Y,
+		AKEYCODE_N,
+		AKEYCODE_TAB,
+		AKEYCODE_ALT_LEFT,
+		AKEYCODE_UNKNOWN,
+		AKEYCODE_UNKNOWN,
+		AKEYCODE_T,
+		AKEYCODE_ENTER,
+		AKEYCODE_ESCAPE
+	};
+	std::array<std::atomic_bool, PC_INPUT_ACTION_COUNT> g_PendingActionPresses{};
+
+	int ActionIndex(PCInputAction action)
+	{
+		return static_cast<int>(action);
+	}
 
 	bool IsKeyboardKeyDown(int keyCode)
 	{
@@ -32,11 +62,30 @@ namespace
 
 	bool IsMouseButtonDown(int button)
 	{
-		return (g_MouseButtons.load(std::memory_order_relaxed) & button) != 0;
+		return g_PCInputEnabled.load(std::memory_order_relaxed) &&
+			(g_MouseButtons.load(std::memory_order_relaxed) & button) != 0;
+	}
+
+	bool IsActionDown(PCInputAction action)
+	{
+		if (!g_PCInputEnabled.load(std::memory_order_relaxed))
+			return false;
+
+		const int keyCode = g_InputBindings[ActionIndex(action)].load(std::memory_order_relaxed);
+		return IsKeyboardKeyDown(keyCode);
+	}
+
+	bool ConsumeActionPress(PCInputAction action)
+	{
+		return g_PCInputEnabled.load(std::memory_order_relaxed) &&
+			g_PendingActionPresses[ActionIndex(action)].exchange(false, std::memory_order_relaxed);
 	}
 
 	bool ConsumeMouseWheel(int direction)
 	{
+		if (!g_PCInputEnabled.load(std::memory_order_relaxed))
+			return false;
+
 		int steps = g_MouseWheelSteps.load(std::memory_order_relaxed);
 		while (steps != 0 && (steps > 0 ? 1 : -1) == direction)
 		{
@@ -59,20 +108,87 @@ namespace
 void SetKeyboardKeyState(int keyCode, bool isDown)
 {
 	if (keyCode >= 0 && keyCode < static_cast<int>(g_KeyboardKeys.size()))
+	{
 		g_KeyboardKeys[keyCode].store(isDown, std::memory_order_relaxed);
+
+		if (!g_PCInputEnabled.load(std::memory_order_relaxed))
+			return;
+		if (!isDown)
+			return;
+
+		for (int action = 0; action < PC_INPUT_ACTION_COUNT; ++action)
+		{
+			if (g_InputBindings[action].load(std::memory_order_relaxed) != keyCode)
+				continue;
+
+			g_PendingActionPresses[action].store(true, std::memory_order_relaxed);
+		}
+	}
 }
 
 void SetMouseButtonState(int buttonState)
 {
-	g_MouseButtons.store(buttonState, std::memory_order_relaxed);
+	g_MouseButtons.store(g_PCInputEnabled.load(std::memory_order_relaxed) ? buttonState : 0,
+		std::memory_order_relaxed);
 }
 
 void SetMouseWheelDirection(int direction)
 {
+	if (!g_PCInputEnabled.load(std::memory_order_relaxed))
+		return;
+
 	if (direction > 0)
 		g_MouseWheelSteps.fetch_add(1, std::memory_order_relaxed);
 	else if (direction < 0)
 		g_MouseWheelSteps.fetch_sub(1, std::memory_order_relaxed);
+}
+
+void SetPCInputEnabled(bool enabled)
+{
+	g_PCInputEnabled.store(enabled, std::memory_order_relaxed);
+	if (!enabled)
+	{
+		for (auto& key : g_KeyboardKeys)
+			key.store(false, std::memory_order_relaxed);
+		for (auto& press : g_PendingActionPresses)
+			press.store(false, std::memory_order_relaxed);
+		g_MouseButtons.store(0, std::memory_order_relaxed);
+		g_MouseWheelSteps.store(0, std::memory_order_relaxed);
+	}
+}
+
+void SetPhysicalKeyboardAvailable(bool available)
+{
+	g_PhysicalKeyboardAvailable.store(available, std::memory_order_relaxed);
+}
+
+void SetPCInputBinding(int action, int keyCode)
+{
+	if (action < 0 || action >= PC_INPUT_ACTION_COUNT || keyCode < 0 || keyCode >= 512)
+		return;
+
+	g_InputBindings[action].store(keyCode, std::memory_order_relaxed);
+	g_PendingActionPresses[action].store(false, std::memory_order_relaxed);
+}
+
+bool IsPCInputEnabled()
+{
+	return g_PCInputEnabled.load(std::memory_order_relaxed);
+}
+
+bool IsPhysicalKeyboardAvailable()
+{
+	return g_PhysicalKeyboardAvailable.load(std::memory_order_relaxed);
+}
+
+bool IsPCInputActionDown(PCInputAction action)
+{
+	return IsActionDown(action);
+}
+
+bool ConsumePCInputActionPress(PCInputAction action)
+{
+	return ConsumeActionPress(action);
 }
 
 uint16_t(*CPad__GetPedWalkLeftRight)(uintptr_t thiz);
@@ -94,10 +210,10 @@ uint16_t CPad__GetPedWalkLeftRight_hook(uintptr_t thiz)
 		// Local player
 		uint16_t movement = MergeAxis(
 			CPad__GetPedWalkLeftRight(thiz),
-			IsKeyboardKeyDown(AKEYCODE_A) || IsKeyboardKeyDown(AKEYCODE_DPAD_LEFT),
-			IsKeyboardKeyDown(AKEYCODE_D) || IsKeyboardKeyDown(AKEYCODE_DPAD_RIGHT));
+			IsActionDown(PCInputAction::MOVE_LEFT) || IsKeyboardKeyDown(AKEYCODE_DPAD_LEFT),
+			IsActionDown(PCInputAction::MOVE_RIGHT) || IsKeyboardKeyDown(AKEYCODE_DPAD_RIGHT));
 		if ((movement == 0xFF80 || movement == 0x80) &&
-			(IsKeyboardKeyDown(AKEYCODE_ALT_LEFT) || IsKeyboardKeyDown(AKEYCODE_ALT_RIGHT)))
+			(IsActionDown(PCInputAction::WALK) || IsKeyboardKeyDown(AKEYCODE_ALT_RIGHT)))
 			movement = 0x20;
 		LocalPlayerKeys.wKeyLR = movement;
 		return LocalPlayerKeys.wKeyLR;
@@ -123,10 +239,10 @@ uint16_t CPad__GetPedWalkUpDown_hook(uintptr_t thiz)
 		// Local player
 		uint16_t movement = MergeAxis(
 			CPad__GetPedWalkUpDown(thiz),
-			IsKeyboardKeyDown(AKEYCODE_W) || IsKeyboardKeyDown(AKEYCODE_DPAD_UP),
-			IsKeyboardKeyDown(AKEYCODE_S) || IsKeyboardKeyDown(AKEYCODE_DPAD_DOWN));
+			IsActionDown(PCInputAction::MOVE_FORWARD) || IsKeyboardKeyDown(AKEYCODE_DPAD_UP),
+			IsActionDown(PCInputAction::MOVE_BACKWARD) || IsKeyboardKeyDown(AKEYCODE_DPAD_DOWN));
 		if ((movement == 0xFF80 || movement == 0x80) &&
-			(IsKeyboardKeyDown(AKEYCODE_ALT_LEFT) || IsKeyboardKeyDown(AKEYCODE_ALT_RIGHT)))
+			(IsActionDown(PCInputAction::WALK) || IsKeyboardKeyDown(AKEYCODE_ALT_RIGHT)))
 			movement = 0x20;
 		LocalPlayerKeys.wKeyUD = movement;
 		return LocalPlayerKeys.wKeyUD;
@@ -143,7 +259,7 @@ uint32_t CPad__GetSprint_hook(uintptr_t thiz, uint32_t unk)
 	else
 	{
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_SPRINT] =
-			CPad__GetSprint(thiz, unk) || IsKeyboardKeyDown(AKEYCODE_SPACE);
+			CPad__GetSprint(thiz, unk) || IsActionDown(PCInputAction::SPRINT);
 		return LocalPlayerKeys.bKeys[ePadKeys::KEY_SPRINT];
 	}
 }
@@ -166,8 +282,7 @@ uint32_t CPad__JumpJustDown_hook(uintptr_t thiz)
 	else
 	{
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_JUMP] =
-			CPad__JumpJustDown(thiz) || IsKeyboardKeyDown(AKEYCODE_SHIFT_LEFT) ||
-			IsKeyboardKeyDown(AKEYCODE_SHIFT_RIGHT);
+			CPad__JumpJustDown(thiz) || IsActionDown(PCInputAction::JUMP);
 		return LocalPlayerKeys.bKeys[ePadKeys::KEY_JUMP];
 	}
 }
@@ -183,8 +298,7 @@ uint32_t CPad__GetJump_hook(uintptr_t thiz)
 	else
 	{
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_JUMP] =
-			CPad__JumpJustDown(thiz) || IsKeyboardKeyDown(AKEYCODE_SHIFT_LEFT) ||
-			IsKeyboardKeyDown(AKEYCODE_SHIFT_RIGHT);
+			CPad__JumpJustDown(thiz) || IsActionDown(PCInputAction::JUMP);
 		return LocalPlayerKeys.bKeys[ePadKeys::KEY_JUMP];
 	}
 }
@@ -199,8 +313,7 @@ uint32_t CPad__GetAutoClimb_hook(uintptr_t thiz)
 	else
 	{
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_JUMP] =
-			CPad__GetAutoClimb(thiz) || IsKeyboardKeyDown(AKEYCODE_SHIFT_LEFT) ||
-			IsKeyboardKeyDown(AKEYCODE_SHIFT_RIGHT);
+			CPad__GetAutoClimb(thiz) || IsActionDown(PCInputAction::JUMP);
 		return LocalPlayerKeys.bKeys[ePadKeys::KEY_JUMP];
 	}
 }
@@ -246,8 +359,7 @@ uint32_t CPad__SwimJumpJustDown_hook(uintptr_t thiz)
 	else
 	{
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_JUMP] =
-			CPad__SwimJumpJustDown(thiz) || IsKeyboardKeyDown(AKEYCODE_SHIFT_LEFT) ||
-			IsKeyboardKeyDown(AKEYCODE_SHIFT_RIGHT);
+			CPad__SwimJumpJustDown(thiz) || IsActionDown(PCInputAction::JUMP);
 		return LocalPlayerKeys.bKeys[ePadKeys::KEY_JUMP];
 	}
 }
@@ -261,7 +373,8 @@ uint32_t CPad__DuckJustDown_hook(uintptr_t thiz, int unk)
 	}
 	else
 	{
-		return CPad__DuckJustDown(thiz, unk) || IsKeyboardKeyDown(AKEYCODE_C);
+		return CPad__DuckJustDown(thiz, unk) || IsActionDown(PCInputAction::CROUCH) ||
+			IsKeyboardKeyDown(AKEYCODE_CTRL_LEFT) || IsKeyboardKeyDown(AKEYCODE_CTRL_RIGHT);
 	}
 }
 
@@ -331,8 +444,8 @@ int16_t CPad__GetSteeringLeftRight_hook(uintptr_t thiz)
 		// local player
 		LocalPlayerKeys.wKeyLR = MergeAxis(
 			CPad__GetSteeringLeftRight(thiz),
-			IsKeyboardKeyDown(AKEYCODE_A) || IsKeyboardKeyDown(AKEYCODE_DPAD_LEFT),
-			IsKeyboardKeyDown(AKEYCODE_D) || IsKeyboardKeyDown(AKEYCODE_DPAD_RIGHT));
+			IsActionDown(PCInputAction::MOVE_LEFT) || IsKeyboardKeyDown(AKEYCODE_DPAD_LEFT),
+			IsActionDown(PCInputAction::MOVE_RIGHT) || IsKeyboardKeyDown(AKEYCODE_DPAD_RIGHT));
 		return LocalPlayerKeys.wKeyLR;
 	}
 }
@@ -350,8 +463,8 @@ uint16_t CPad__GetSteeringUpDown_hook(uintptr_t thiz)
 		// local player
 		LocalPlayerKeys.wKeyUD = MergeAxis(
 			CPad__GetSteeringUpDown(thiz),
-			IsKeyboardKeyDown(AKEYCODE_W) || IsKeyboardKeyDown(AKEYCODE_DPAD_UP),
-			IsKeyboardKeyDown(AKEYCODE_S) || IsKeyboardKeyDown(AKEYCODE_DPAD_DOWN));
+			IsActionDown(PCInputAction::MOVE_FORWARD) || IsKeyboardKeyDown(AKEYCODE_DPAD_UP),
+			IsActionDown(PCInputAction::MOVE_BACKWARD) || IsKeyboardKeyDown(AKEYCODE_DPAD_DOWN));
 		return LocalPlayerKeys.wKeyUD;
 	}
 }
@@ -376,7 +489,7 @@ uint16_t CPad__GetAccelerate_hook(uintptr_t thiz)
 
 		// local player
 		uint16_t wAccelerate = CPad__GetAccelerate(thiz);
-		if (IsKeyboardKeyDown(AKEYCODE_W) || IsKeyboardKeyDown(AKEYCODE_DPAD_UP))
+		if (IsActionDown(PCInputAction::MOVE_FORWARD) || IsKeyboardKeyDown(AKEYCODE_DPAD_UP))
 			wAccelerate = 0xFF;
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_SPRINT] = wAccelerate;
 		if (wAccelerate == 0xFF)
@@ -417,7 +530,7 @@ uint16_t CPad__GetBrake_hook(uintptr_t thiz)
 
 		// local player
 		uint16_t wBrake = CPad__GetBrake(thiz);
-		if (IsKeyboardKeyDown(AKEYCODE_S) || IsKeyboardKeyDown(AKEYCODE_DPAD_DOWN))
+		if (IsActionDown(PCInputAction::MOVE_BACKWARD) || IsKeyboardKeyDown(AKEYCODE_DPAD_DOWN))
 			wBrake = 0xFF;
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_JUMP] = wBrake;
         if (wBrake == 0xFF)
@@ -450,7 +563,7 @@ uint32_t CPad__GetHandBrake_hook(uintptr_t thiz)
 	{
 		// local player
 		uint32_t handBrake = CPad__GetHandBrake(thiz) ||
-			IsKeyboardKeyDown(AKEYCODE_SPACE) || IsMouseButtonDown(2);
+			IsActionDown(PCInputAction::JUMP);
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_HANDBRAKE] = handBrake;
 		return handBrake;
 	}
@@ -467,7 +580,7 @@ uint32_t CPad__GetHorn_hook(uintptr_t thiz)
 	else
 	{
 		// local player
-		uint32_t horn = CPad__GetHorn(thiz) || IsKeyboardKeyDown(AKEYCODE_H);
+		uint32_t horn = CPad__GetHorn(thiz) || IsActionDown(PCInputAction::HORN);
 		//Log("horn: %d", horn);
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_CROUCH] = horn;
 		return LocalPlayerKeys.bKeys[ePadKeys::KEY_CROUCH];
@@ -523,7 +636,10 @@ uint32_t CPad__ExitVehicleJustDown_hook(uintptr_t thiz, int a2, uintptr_t vehicl
 uint32_t(*CPad__GetExitVehicle)(uintptr_t thiz);
 uint32_t CPad__GetExitVehicle_hook(uintptr_t thiz)
 {
-    return 0;
+	if (CWorld::PlayerInFocus)
+		return CPad__GetExitVehicle(thiz);
+
+	return CPad__GetExitVehicle(thiz) || IsActionDown(PCInputAction::ENTER_EXIT_VEHICLE);
 }
 
 
@@ -541,7 +657,7 @@ bool CPad__GetEnterTargeting_hook(uintptr_t thiz)
         uint8_t old = CWorld::PlayerInFocus;
         CWorld::PlayerInFocus = byteCurPlayer;
         uintptr_t result = CPad__GetEnterTargeting(thiz) ||
-            IsMouseButtonDown(2) || IsKeyboardKeyDown(AKEYCODE_CTRL_RIGHT);
+			IsMouseButtonDown(2) || IsActionDown(PCInputAction::AIM);
         LocalPlayerKeys.bKeys[ePadKeys::KEY_HANDBRAKE] = result;
         CWorld::PlayerInFocus = old;
         return result;
@@ -557,7 +673,8 @@ uint32_t CPad__CycleWeaponRightJustDown_hook(uintptr_t thiz)
 	}
 	else
 	{
-		return CPad__CycleWeaponRightJustDown(thiz) || ConsumeMouseWheel(1);
+		return CPad__CycleWeaponRightJustDown(thiz) || ConsumeMouseWheel(1) ||
+			ConsumeActionPress(PCInputAction::WEAPON_NEXT);
 	}
 }
 
@@ -570,7 +687,8 @@ uint32_t CPad__CycleWeaponLeftJustDown_hook(uintptr_t thiz)
 	}
 	else
 	{
-		return CPad__CycleWeaponLeftJustDown(thiz) || ConsumeMouseWheel(-1);
+		return CPad__CycleWeaponLeftJustDown(thiz) || ConsumeMouseWheel(-1) ||
+			ConsumeActionPress(PCInputAction::WEAPON_PREVIOUS);
 	}
 }
 
@@ -585,9 +703,7 @@ bool CPad__GetWeapon_hook(uintptr_t thiz, CPedGTA* pPed)
 	{
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_FIRE] =
 			CPad__GetWeapon(thiz, pPed) ||
-			IsKeyboardKeyDown(AKEYCODE_CTRL_LEFT) ||
-			IsKeyboardKeyDown(AKEYCODE_CTRL_RIGHT) ||
-			IsMouseButtonDown(1);
+			IsActionDown(PCInputAction::ATTACK) || IsMouseButtonDown(1);
 		return LocalPlayerKeys.bKeys[ePadKeys::KEY_FIRE];
 	}
 }
@@ -604,7 +720,7 @@ uint32_t CCamera_IsTargetingActive_hook(uintptr_t thiz, CPedGTA* pPed)
         /* CCamera::IsTargetingActive */
         static CCamera& TheCamera = *reinterpret_cast<CCamera*>(g_libGTASA + 0xBBA8D0);
         uint32_t bIsTargeting = CHook::CallFunction<bool>(g_libGTASA + 0x4B8154, &TheCamera) ||
-			IsMouseButtonDown(2) || IsKeyboardKeyDown(AKEYCODE_CTRL_RIGHT);
+			IsMouseButtonDown(2) || IsActionDown(PCInputAction::AIM);
 
         LocalPlayerKeys.bKeys[ePadKeys::KEY_HANDBRAKE] = bIsTargeting;
         return bIsTargeting;
@@ -616,8 +732,17 @@ uint32_t CPad__GetDisplayVitalStats_hook(uint32_t thiz)
 {
 	uint32_t result = CPad__GetDisplayVitalStats(thiz);
 
-	if (pUI && (result || IsKeyboardKeyDown(AKEYCODE_TAB))) {
-		pUI->playertablist()->show();
+	if (pUI)
+	{
+		if (result || IsActionDown(PCInputAction::SCOREBOARD))
+		{
+			if (!pUI->playertablist()->visible())
+				pUI->playertablist()->show();
+		}
+		else if (pUI->playertablist()->visible())
+		{
+			pUI->playertablist()->hide();
+		}
 	}
 
 	return 0;
@@ -1056,8 +1181,7 @@ void HookCPad()
     CHook::InlineHook("_ZN4CPad12GetHandBrakeEv", &CPad__GetHandBrake_hook, &CPad__GetHandBrake);
     CHook::InlineHook("_ZN4CPad7GetHornEb", &CPad__GetHorn_hook, &CPad__GetHorn);
 
-    //CHook::InstallPLT(g_libGTASA + 0x66EB90, (uintptr_t)CPad__ExitVehicleJustDown_hook, (uintptr_t*)& CPad__ExitVehicleJustDown);
-    //CHook::InstallPLT(g_libGTASA + 0x672440, (uintptr_t)CPad__GetExitVehicle_hook, (uintptr_t*)&CPad__GetExitVehicle);
+	CHook::InlineHook("_ZN4CPad14GetExitVehicleEv", &CPad__GetExitVehicle_hook, &CPad__GetExitVehicle);
 
     CHook::InstallPLT(g_libGTASA + 0x675394, (uintptr_t)CPad__GetDisplayVitalStats_hook, (uintptr_t*)&CPad__GetDisplayVitalStats);
     //����ҧ������ͧ�ѹ��ѧ
@@ -1068,7 +1192,7 @@ void HookCPad()
     CHook::InlineHook("_ZN4CPad9GetWeaponEP4CPedb", &CPad__GetWeapon_hook, &CPad__GetWeapon);
     CHook::InlineHook("_ZN7CCamera17IsTargetingActiveEP10CPlayerPed", &CCamera_IsTargetingActive_hook, &CCamera_IsTargetingActive);
     CHook::InlineHook("_ZN4CPad24CycleWeaponRightJustDownEv", &CPad__CycleWeaponRightJustDown_hook, &CPad__CycleWeaponRightJustDown);
-    //CHook::InstallPLT(g_libGTASA + 0x66F304, (uintptr_t)CPad__CycleWeaponLeftJustDown_hook, (uintptr_t*)&CPad__CycleWeaponLeftJustDown);
+	CHook::InlineHook("_ZN4CPad23CycleWeaponLeftJustDownEv", &CPad__CycleWeaponLeftJustDown_hook, &CPad__CycleWeaponLeftJustDown);
 
     // nitro
     CHook::InlineHook("_ZN4CPad13GetNitroFiredEv", &CPad__GetNitroFired_hook, &CPad__GetNitroFired);

@@ -2,6 +2,7 @@
 #include "../../game/game.h"
 #include "../../net/netgame.h"
 #include "../../main.h"
+#include "../../java/jniutil.h"
 
 
 #include <iomanip>
@@ -9,6 +10,7 @@
 extern UI* pUI;
 extern CGame* pGame;
 extern CNetGame* pNetGame;
+extern CJavaWrapper* pJavaWrapper;
 
 PlayerTabList::PlayerTabList()
 {
@@ -41,6 +43,8 @@ void PlayerTabList::show()
 
 
 	setVisible(true);
+	if (pJavaWrapper)
+		pJavaWrapper->SetNativeInterfaceVisible(true);
 }
 
 void PlayerTabList::hide()
@@ -60,6 +64,8 @@ void PlayerTabList::hide()
 
 	pGame->EnableGameInput(true);
 	setVisible(false);
+	if (pJavaWrapper)
+		pJavaWrapper->SetNativeInterfaceVisible(false);
 }
 
 std::string int_to_hex(int val)

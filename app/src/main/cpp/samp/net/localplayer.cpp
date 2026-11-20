@@ -1,5 +1,6 @@
 ﻿#include "../main.h"
 #include "../game/game.h"
+#include "../game/pad.h"
 #include "netgame.h"
 #include "localplayer.h"
 #include "../gui/gui.h"
@@ -132,7 +133,8 @@ bool CLocalPlayer::Process()
 		if(m_pPlayerPed->GetDanceStyle() != -1) 
 		{
 			m_pPlayerPed->ProcessDancing();
-			if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK] || m_pPlayerPed->IsInVehicle()
+			if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK] ||
+				IsPCInputActionDown(PCInputAction::ACCEPT) || m_pPlayerPed->IsInVehicle()
 				|| m_pPlayerPed->IsInJetpackMode())
 			{ 
 				m_pPlayerPed->StopDancing();
@@ -142,7 +144,8 @@ bool CLocalPlayer::Process()
 		// HANDLE I GOT MY HANDS UP BUT DON'T WANT TO ANYMORE
 		if(m_pPlayerPed->HasHandsUp())
 		{ 
-			if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK] || m_pPlayerPed->IsInVehicle()
+			if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK] ||
+				IsPCInputActionDown(PCInputAction::ACCEPT) || m_pPlayerPed->IsInVehicle()
 				|| m_pPlayerPed->IsInJetpackMode())
 			{ 
 				m_pPlayerPed->TogglePlayerControllable(true);
@@ -152,7 +155,8 @@ bool CLocalPlayer::Process()
 		// HANDLE PHONE LOCAL PED
 		if(m_pPlayerPed->IsCellphoneEnabled()) 
 		{
-			if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK] || m_pPlayerPed->IsInVehicle()
+			if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK] ||
+				IsPCInputActionDown(PCInputAction::ACCEPT) || m_pPlayerPed->IsInVehicle()
 				|| m_pPlayerPed->IsInJetpackMode())
 			{ 
 				m_pPlayerPed->ToggleCellphone(0);
@@ -162,7 +166,8 @@ bool CLocalPlayer::Process()
 		// HANDLE URINATING LOCAL PED
 		if(m_pPlayerPed->IsPissing())
 		{ 
-			if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK] || m_pPlayerPed->IsInVehicle()
+			if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK] ||
+				IsPCInputActionDown(PCInputAction::ACCEPT) || m_pPlayerPed->IsInVehicle()
 				|| m_pPlayerPed->IsInJetpackMode())
 			{ 
 				m_pPlayerPed->StopPissing();
@@ -184,7 +189,8 @@ bool CLocalPlayer::Process()
 				}
 			}
 
-			if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK] || m_pPlayerPed->IsInVehicle()
+			if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK] ||
+				IsPCInputActionDown(PCInputAction::ACCEPT) || m_pPlayerPed->IsInVehicle()
 				|| m_pPlayerPed->IsInJetpackMode())
 			{
 				m_pPlayerPed->DropStuff();

@@ -287,6 +287,28 @@ extern "C" {
 	{
 		SetMouseWheelDirection(direction);
 	}
+	JNIEXPORT void JNICALL Java_com_samp_mobile_game_SAMP_setPCInputEnabled(JNIEnv *pEnv, jobject thiz, jboolean enabled)
+	{
+		SetPCInputEnabled(enabled == JNI_TRUE);
+	}
+	JNIEXPORT void JNICALL Java_com_samp_mobile_game_SAMP_setPCInputBinding(JNIEnv *pEnv, jobject thiz, jint action, jint keyCode)
+	{
+		SetPCInputBinding(action, keyCode);
+	}
+	JNIEXPORT void JNICALL Java_com_samp_mobile_game_SAMP_setPhysicalKeyboardAvailable(JNIEnv *pEnv, jobject thiz, jboolean available)
+	{
+		SetPhysicalKeyboardAvailable(available == JNI_TRUE);
+	}
+	JNIEXPORT void JNICALL Java_com_samp_mobile_game_SAMP_openChatInput(JNIEnv *pEnv, jobject thiz)
+	{
+		if (pUI)
+			pUI->keyboard()->show(pUI->chat());
+	}
+	JNIEXPORT void JNICALL Java_com_samp_mobile_game_SAMP_closeChatInput(JNIEnv *pEnv, jobject thiz)
+	{
+		if (pUI)
+			pUI->keyboard()->hide();
+	}
 	JNIEXPORT void JNICALL Java_com_samp_mobile_game_SAMP_onEventBackPressed(JNIEnv *pEnv, jobject thiz)
 	{
 		if(pSettings)

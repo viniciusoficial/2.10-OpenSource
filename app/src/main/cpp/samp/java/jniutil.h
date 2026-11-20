@@ -27,6 +27,8 @@ public:
     
     void ShowKeyboard();
     void HideKeyboard();
+	void ShowPCInputConfig();
+	void SetNativeInterfaceVisible(bool visible);
 
 	void exitGame();
 
@@ -54,6 +56,8 @@ public:
     jmethodID s_hideTab;
     jmethodID s_showInputLayout;
     jmethodID s_hideInputLayout;
+	jmethodID s_showPCInputConfig;
+	jmethodID s_setNativeInterfaceVisible;
 	jmethodID s_exitGame;
 	jmethodID s_showEditObject;
 	jmethodID s_hideEditObject;

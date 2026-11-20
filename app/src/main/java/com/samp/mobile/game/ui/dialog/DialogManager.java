@@ -21,6 +21,7 @@ import androidx.recyclerview.widget.SimpleItemAnimator;
 import com.joom.paranoid.Obfuscate;
 import com.nvidia.devtech.NvEventQueueActivity;
 import com.samp.mobile.R;
+import com.samp.mobile.game.SAMP;
 import com.samp.mobile.launcher.util.CustomRecyclerView;
 import com.samp.mobile.launcher.util.Util;
 
@@ -171,6 +172,9 @@ public class DialogManager {
 
         isShow = false;
         Util.HideLayout(this.mMainLayout, true);
+        if (activity instanceof SAMP) {
+            ((SAMP) activity).setGameInterfaceVisible(false);
+        }
     }
 
     public void onHeightChanged(int i) {
@@ -242,6 +246,9 @@ public class DialogManager {
 
     public void loadDialogData() {
         setDialogStyle(this.mDialogStyle);
+        if (this.mDialogStyle == DIALOG_STYLE_INPUT || this.mDialogStyle == DIALOG_STYLE_PASSWORD) {
+            this.mDialogInput.requestFocus();
+        }
         this.mDialogCaption.setText(Util.getColoredString(this.mCaption));
         int i = this.mDialogStyle;
         if (i == 0 || i == 1 || i == 3) {
@@ -369,6 +376,17 @@ public class DialogManager {
             public void onTextChanged(CharSequence charSequence, int i, int i2, int i3) {
                 String unused = DialogManager.this.mCurrentInputtext = charSequence.toString();
             }
+        });
+        this.mDialogInput.setOnEditorActionListener((view, actionId, event) -> {
+            boolean enterPressed = event != null &&
+                    event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER &&
+                    event.getAction() == android.view.KeyEvent.ACTION_UP;
+            if (enterPressed || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE ||
+                    actionId == android.view.inputmethod.EditorInfo.IME_ACTION_NEXT) {
+                SendDialogResponse(1, mCurrentListitem, mCurrentInputtext);
+                return true;
+            }
+            return false;
         });
     }
 

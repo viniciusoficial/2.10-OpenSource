@@ -8,6 +8,7 @@
 #include "Streaming.h"
 #include "World.h"
 #include "game/Models/ModelInfo.h"
+#include "pad.h"
 
 extern CGame* pGame;
 extern CNetGame* pNetGame;
@@ -659,20 +660,23 @@ void CPlayerPed::SetKeys(uint16_t lrAnalog, uint16_t udAnalog, uint16_t wKeys)
 uint8_t CPlayerPed::GetAdditionalKeys()
 {
 	uint8_t byteRet = 0;
+	const bool pcYes = ConsumePCInputActionPress(PCInputAction::YES);
+	const bool pcNo = ConsumePCInputActionPress(PCInputAction::NO);
+	const bool pcHorn = ConsumePCInputActionPress(PCInputAction::HORN);
 
-	if(LocalPlayerKeys.bKeys[ePadKeys::KEY_YES])
+	if(LocalPlayerKeys.bKeys[ePadKeys::KEY_YES] || pcYes)
 	{
 		byteRet = 1;
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_YES] = false;
 	}
 
-	if(LocalPlayerKeys.bKeys[ePadKeys::KEY_NO])
+	if(LocalPlayerKeys.bKeys[ePadKeys::KEY_NO] || pcNo)
 	{
 		byteRet = 2;
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_NO] = false;
 	}
 
-	if(LocalPlayerKeys.bKeys[ePadKeys::KEY_CTRL_BACK])
+	if(LocalPlayerKeys.bKeys[ePadKeys::KEY_CTRL_BACK] || pcHorn)
 	{
 		byteRet = 3;
 		LocalPlayerKeys.bKeys[ePadKeys::KEY_CTRL_BACK] = false;
@@ -719,7 +723,8 @@ uint16_t CPlayerPed::GetKeys(uint16_t *lrAnalog, uint16_t *udAnalog, bool clear)
 	if(LocalPlayerKeys.bKeys[ePadKeys::KEY_JUMP]) wRet |= 1;
 	wRet <<= 1;
 	// KEY_SECONDARY_ATTACK
-	if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK]) wRet |= 1;
+	if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SECONDARY_ATTACK] ||
+		IsPCInputActionDown(PCInputAction::ACCEPT)) wRet |= 1;
 	wRet <<= 1;
 	// KEY_SPRINT
 	if(LocalPlayerKeys.bKeys[ePadKeys::KEY_SPRINT]) wRet |= 1;

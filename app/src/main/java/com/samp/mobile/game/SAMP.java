@@ -7,7 +7,6 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SurfaceView;
 import android.view.View;
-import android.view.inputmethod.InputMethodManager;
 import android.widget.Toast;
 
 import com.google.firebase.crashlytics.FirebaseCrashlytics;
@@ -16,7 +15,6 @@ import com.samp.mobile.game.ui.AttachEdit;
 import com.samp.mobile.game.ui.CustomKeyboard;
 import com.samp.mobile.game.ui.LoadingScreen;
 import com.samp.mobile.game.ui.dialog.DialogManager;
-import com.samp.mobile.launcher.util.SharedPreferenceCore;
 import com.samp.mobile.launcher.util.SignatureChecker;
 
 import java.io.UnsupportedEncodingException;
@@ -34,10 +32,14 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
 
     private AttachEdit mAttachEdit;
     private LoadingScreen mLoadingScreen;
+    private PcInputConfig mPcInputConfig;
     private final Set<Integer> mPressedKeys = new HashSet<>();
     private boolean mMouseLookTouchStarted;
+    private boolean mCameraModeRequested = true;
+    private boolean mNativeInterfaceVisible;
     private float mMouseLookX;
     private float mMouseLookY;
+    private int mMouseButtons;
 
     public native void sendDialogResponse(int i, int i2, int i3, byte[] str);
 
@@ -47,12 +49,12 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
 
     private void showTab()
     {
-
+        setNativeInterfaceVisible(true);
     }
 
     private void hideTab()
     {
-
+        setNativeInterfaceVisible(false);
     }
 
     private void setTab(int id, String name, int score, int ping)
@@ -85,6 +87,7 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
             @Override
             public void run() {
                 if (pause) {
+                    setGameInterfaceVisible(true);
                     mDialog.hideWithoutReset();
                     mAttachEdit.hideWithoutReset();
                 }
@@ -93,6 +96,7 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
                         mDialog.showWithOldContent();
                     if(mAttachEdit.isShow)
                         mAttachEdit.showWithoutReset();
+                    setGameInterfaceVisible(false);
                 }
             }
         });
@@ -110,7 +114,10 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
         final String content = new String(bArr2, StandardCharsets.UTF_8);
         final String leftBtnText = new String(bArr3, StandardCharsets.UTF_8);
         final String rightBtnText = new String(bArr4, StandardCharsets.UTF_8);
-        runOnUiThread(() -> { this.mDialog.show(dialogId, dialogTypeId, caption, content, leftBtnText, rightBtnText); });
+        runOnUiThread(() -> {
+            setGameInterfaceVisible(true);
+            this.mDialog.show(dialogId, dialogTypeId, caption, content, leftBtnText, rightBtnText);
+        });
     }
 
     private native void onInputEnd(byte[] str);
@@ -142,6 +149,7 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
             public void run() {
                 Log.d("AXL", "showKeyboard()");
                 mKeyboard.ShowInputLayout();
+                setGameInterfaceVisible(true);
             }
         });
     }
@@ -152,6 +160,7 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
             @Override
             public void run() {
                 mKeyboard.HideInputLayout();
+                setGameInterfaceVisible(false);
             }
         });
     }
@@ -162,6 +171,7 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
             @Override
             public void run() {
                 mAttachEdit.show();
+                setGameInterfaceVisible(true);
             }
         });
     }
@@ -172,6 +182,7 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
             @Override
             public void run() {
                 mAttachEdit.hide();
+                setGameInterfaceVisible(false);
             }
         });
     }
@@ -198,11 +209,47 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
         mLoadingScreen = new LoadingScreen(this);
 
         instance = this;
+        mPcInputConfig = new PcInputConfig(this, new PcInputConfig.Listener() {
+            @Override
+            public void onSettingsChanged(boolean enabled, int[] bindings) {
+                for (int action = 0; action < bindings.length; action++) {
+                    setPCInputBinding(action, bindings[action]);
+                }
+                clearHardwareKeyboardState();
+                setPCInputEnabled(enabled);
+                if (!enabled) {
+                    mCameraModeRequested = false;
+                } else {
+                    mCameraModeRequested = true;
+                }
+                updatePointerCapture();
+            }
+
+            @Override
+            public void onMouseSettingsChanged(float sensitivityX, float sensitivityY,
+                                               boolean invertX, boolean invertY) {
+            }
+
+            @Override
+            public void onVisibilityChanged(boolean visible) {
+                if (visible) {
+                    setGameInterfaceVisible(true);
+                } else {
+                    setGameInterfaceVisible(false);
+                }
+            }
+        });
+        for (int action = 0; action < PcInputConfig.ACTION_COUNT; action++) {
+            setPCInputBinding(action, mPcInputConfig.getBinding(action));
+        }
+        setPCInputEnabled(mPcInputConfig.isEnabled());
+        updatePhysicalKeyboardAvailability();
 
         SurfaceView surfaceView = GetSurfaceView();
         if (surfaceView != null) {
             surfaceView.setOnCapturedPointerListener(this::onCapturedPointerEvent);
             surfaceView.setOnGenericMotionListener(this::onGenericMotionEvent);
+            surfaceView.setOnTouchListener(this::onMouseTouch);
         }
 
         try {
@@ -217,7 +264,11 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
     private native void setKeyboardKeyState(int keyCode, boolean isDown);
     private native void setMouseButtonState(int buttonState);
     private native void setMouseWheelDirection(int direction);
-
+    private native void setPCInputEnabled(boolean enabled);
+    private native void setPCInputBinding(int action, int keyCode);
+    private native void setPhysicalKeyboardAvailable(boolean available);
+    private native void openChatInput();
+    private native void closeChatInput();
 
 
     @Override
@@ -236,7 +287,22 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
     public void onResume() {
         Log.i(TAG, "**** onResume");
         super.onResume();
+        updatePointerCapture();
         //mHeightProvider.init(view);
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        updatePhysicalKeyboardAvailability();
+    }
+
+    public void showPCInputConfig() {
+        runOnUiThread(() -> {
+            if (mPcInputConfig != null) {
+                mPcInputConfig.show();
+            }
+        });
     }
 
     public native void onEventBackPressed();
@@ -249,16 +315,62 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_ESCAPE && isMouseCaptured()) {
-            releaseMouseCapture();
+        if (mPcInputConfig != null && mPcInputConfig.isVisible()) {
+            if (mPcInputConfig.onKeyDown(keyCode) || event.getRepeatCount() > 0 ||
+                    keyCode != mPcInputConfig.getBinding(PcInputConfig.TOGGLE_MOUSE)) {
+                return true;
+            }
+        }
+
+        if (mPcInputConfig != null && event.getRepeatCount() > 0 &&
+                keyCode == mPcInputConfig.getBinding(PcInputConfig.CHAT)) {
             return true;
         }
-        if (isGameInputActive()) {
-            mPressedKeys.add(keyCode);
-            setKeyboardKeyState(keyCode, true);
+        if (mPcInputConfig != null && keyCode == mPcInputConfig.getBinding(PcInputConfig.TOGGLE_MOUSE)) {
+            if (event.getRepeatCount() > 0) {
+                return true;
+            }
+            if (mPcInputConfig.isVisible()) {
+                mPcInputConfig.dismiss();
+                return true;
+            }
+            if (mDialog != null && mDialog.isShow) {
+                return true;
+            }
+            if (mKeyboard != null && mKeyboard.IsShowing()) {
+                closeChatInput();
+                return true;
+            }
+            if (mAttachEdit != null && mAttachEdit.isShow) {
+                return true;
+            }
+            if (mNativeInterfaceVisible) {
+                return true;
+            }
+            if (isGameInputActive() && mPcInputConfig.isEnabled()) {
+                mCameraModeRequested = !mCameraModeRequested;
+                updatePointerCapture();
+                return true;
+            }
         }
-        if(keyCode == KeyEvent.KEYCODE_BACK)
-        {
+
+        if (isGameInputActive() && mPcInputConfig != null && mPcInputConfig.isEnabled()) {
+            if (keyCode == mPcInputConfig.getBinding(PcInputConfig.CHAT)) {
+                if (event.getRepeatCount() == 0) {
+                    openChatInput();
+                }
+                return true;
+            }
+            if (event.getRepeatCount() == 0) {
+                mPressedKeys.add(keyCode);
+                setKeyboardKeyState(keyCode, true);
+            }
+        } else if (isGameInputActive() && mPcInputConfig != null &&
+                !mPcInputConfig.isEnabled() && event.isFromSource(InputDevice.SOURCE_KEYBOARD)) {
+            return true;
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
             onEventBackPressed();
         }
         return super.onKeyDown(keyCode, event);
@@ -266,25 +378,50 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (mPcInputConfig != null && mPcInputConfig.isVisible()) {
+            mPcInputConfig.onKeyUp(keyCode);
+            return true;
+        }
         mPressedKeys.remove(keyCode);
         setKeyboardKeyState(keyCode, false);
+        if (isGameInputActive() && mPcInputConfig != null &&
+                !mPcInputConfig.isEnabled() && event.isFromSource(InputDevice.SOURCE_KEYBOARD)) {
+            return true;
+        }
         return super.onKeyUp(keyCode, event);
     }
 
-    @Override
-    public boolean onTouch(View view, MotionEvent event) {
-        if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
-            boolean handled = super.onTouch(view, event);
-            setMouseButtonState(event.getButtonState());
-            if (event.getActionMasked() == MotionEvent.ACTION_DOWN && isGameInputActive()) {
-                view.requestPointerCapture();
-            }
-            return handled;
+    private boolean onMouseTouch(View view, MotionEvent event) {
+        if (!event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+            return false;
         }
-        return super.onTouch(view, event);
+        mMouseButtons = event.getButtonState();
+        if (mPcInputConfig != null && mPcInputConfig.isVisible()) {
+            mPcInputConfig.setMouseButtons(mMouseButtons);
+            return false;
+        }
+        if (mPcInputConfig == null || !mPcInputConfig.isEnabled()) {
+            setMouseButtonState(0);
+            return true;
+        }
+        if (!isGameInputActive()) {
+            return false;
+        }
+        setMouseButtonState(mMouseButtons);
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            mCameraModeRequested = true;
+            updatePointerCapture();
+        }
+        return true;
     }
 
     private boolean onCapturedPointerEvent(View view, MotionEvent event) {
+        if (mPcInputConfig == null || !mPcInputConfig.isEnabled() || !isGameInputActive()) {
+            releaseMouseCapture();
+            return true;
+        }
+
+        mMouseButtons = event.getButtonState();
         setMouseButtonState(event.getButtonState());
 
         if (!mMouseLookTouchStarted) {
@@ -295,19 +432,45 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
         }
 
         if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+            float deltaX = event.getAxisValue(MotionEvent.AXIS_RELATIVE_X) *
+                    mPcInputConfig.getSensitivityX() * (mPcInputConfig.isInvertX() ? -1.0f : 1.0f);
+            float deltaY = event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y) *
+                    mPcInputConfig.getSensitivityY() * (mPcInputConfig.isInvertY() ? -1.0f : 1.0f);
             mMouseLookX = Math.max(0, Math.min(view.getWidth(),
-                    mMouseLookX + event.getAxisValue(MotionEvent.AXIS_RELATIVE_X)));
+                    mMouseLookX + deltaX));
             mMouseLookY = Math.max(0, Math.min(view.getHeight(),
-                    mMouseLookY + event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)));
+                    mMouseLookY + deltaY));
             sendMouseLookTouch(MotionEvent.ACTION_MOVE);
+            if (mPcInputConfig.isVisible()) {
+                mPcInputConfig.noteMouseMotion();
+            }
         }
         return true;
     }
 
     private boolean onGenericMotionEvent(View view, MotionEvent event) {
-        if (event.isFromSource(InputDevice.SOURCE_MOUSE) &&
-                event.getActionMasked() == MotionEvent.ACTION_SCROLL) {
+        if (!event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+            return false;
+        }
+        if (mPcInputConfig != null && mPcInputConfig.isVisible()) {
+            mMouseButtons = event.getButtonState();
+            mPcInputConfig.setMouseButtons(mMouseButtons);
+            if (event.getActionMasked() == MotionEvent.ACTION_HOVER_MOVE) {
+                mPcInputConfig.noteMouseMotion();
+            }
+            return false;
+        }
+        if (mPcInputConfig == null || !mPcInputConfig.isEnabled() || !isGameInputActive()) {
+            return false;
+        }
+        if (event.getActionMasked() == MotionEvent.ACTION_SCROLL) {
             setMouseWheelDirection((int) Math.signum(event.getAxisValue(MotionEvent.AXIS_VSCROLL)));
+            return true;
+        }
+        if (event.getActionMasked() == MotionEvent.ACTION_BUTTON_PRESS ||
+                event.getActionMasked() == MotionEvent.ACTION_BUTTON_RELEASE) {
+            mMouseButtons = event.getButtonState();
+            setMouseButtonState(mMouseButtons);
             return true;
         }
         return false;
@@ -340,7 +503,55 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
 
     private boolean isGameInputActive() {
         return (mKeyboard == null || !mKeyboard.IsShowing()) &&
-                (mDialog == null || !mDialog.isShow);
+                (mDialog == null || !mDialog.isShow) &&
+                (mAttachEdit == null || !mAttachEdit.isShow) &&
+                (mPcInputConfig == null || !mPcInputConfig.isVisible()) &&
+                !mNativeInterfaceVisible;
+    }
+
+    public void setGameInterfaceVisible(boolean visible) {
+        if (visible) {
+            mCameraModeRequested = false;
+            clearHardwareKeyboardState();
+            releaseMouseCapture();
+            return;
+        }
+        if (isGameInputActive()) {
+            mCameraModeRequested = true;
+        }
+        updatePointerCapture();
+    }
+
+    public void setNativeInterfaceVisible(boolean visible) {
+        runOnUiThread(() -> {
+            mNativeInterfaceVisible = visible;
+            setGameInterfaceVisible(visible);
+        });
+    }
+
+    private void updatePointerCapture() {
+        if (mCameraModeRequested && mPcInputConfig != null && mPcInputConfig.isEnabled() &&
+                isGameInputActive()) {
+            SurfaceView surfaceView = GetSurfaceView();
+            if (surfaceView != null && surfaceView.isAttachedToWindow() && hasWindowFocus()) {
+                surfaceView.post(() -> {
+                    if (mCameraModeRequested && isGameInputActive() &&
+                            mPcInputConfig.isEnabled() && hasWindowFocus()) {
+                        surfaceView.setFocusableInTouchMode(true);
+                        surfaceView.requestFocus();
+                        surfaceView.requestPointerCapture();
+                    }
+                });
+            }
+        } else {
+            releaseMouseCapture();
+        }
+    }
+
+    private void updatePhysicalKeyboardAvailability() {
+        boolean available = getResources().getConfiguration().keyboard ==
+                android.content.res.Configuration.KEYBOARD_QWERTY;
+        setPhysicalKeyboardAvailable(available);
     }
 
     private void clearHardwareKeyboardState() {
@@ -363,6 +574,8 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
         super.onWindowFocusChanged(hasFocus);
         if (!hasFocus) {
             releaseMouseCapture();
+        } else {
+            updatePointerCapture();
         }
     }
 

@@ -2,8 +2,10 @@
 #include "../../gui.h"
 #include "../../../game/game.h"
 #include "../../../net/netgame.h"
+#include "../../../java/jniutil.h"
 
 extern CNetGame* pNetGame;
+extern CJavaWrapper* pJavaWrapper;
 
 extern void MyLog(const char* fmt, ...);
 
@@ -53,6 +55,8 @@ void Dialog::show(int16_t dialog_id, DialogStyle dialog_style, const std::string
 
 		this->performLayout();
 		this->setVisible(true);
+		if (pJavaWrapper)
+			pJavaWrapper->SetNativeInterfaceVisible(true);
 
 		m_dialogID = dialog_id;
 		//MyLog("Dialog ID %d", dialog_id);
@@ -62,6 +66,8 @@ void Dialog::show(int16_t dialog_id, DialogStyle dialog_style, const std::string
 void Dialog::hide()
 {
 	this->setVisible(false);
+	if (pJavaWrapper)
+		pJavaWrapper->SetNativeInterfaceVisible(false);
 }
 
 void Dialog::setTitleCaption(const std::string& caption)
