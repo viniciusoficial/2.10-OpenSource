@@ -1,0 +1,2 @@
+Download APK Debug:
+github.com/viniciusoficial/2.10-OpenSource/raw/refs/heads/free/app-debug.apk
