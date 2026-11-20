@@ -38,4 +38,8 @@ VALIDATE_SIZE(PAD_KEYS, 24);
 extern PAD_KEYS LocalPlayerKeys;
 extern PAD_KEYS RemotePlayerKeys[PLAYER_PED_SLOTS];
 
+void SetKeyboardKeyState(int keyCode, bool isDown);
+void SetMouseButtonState(int buttonState);
+void SetMouseWheelDirection(int direction);
+
 void HookCPad();

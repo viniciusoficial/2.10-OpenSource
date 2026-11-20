@@ -4,6 +4,7 @@
 
 #include "main.h"
 #include "game/game.h"
+#include "game/pad.h"
 #include "net/netgame.h"
 #include "gui/gui.h"
 #include "playertags.h"
@@ -273,6 +274,18 @@ extern "C" {
 		{
 			pUI->keyboard()->sendForGB(pEnv, thiz, str);
 		}
+	}
+	JNIEXPORT void JNICALL Java_com_samp_mobile_game_SAMP_setKeyboardKeyState(JNIEnv *pEnv, jobject thiz, jint keyCode, jboolean isDown)
+	{
+		SetKeyboardKeyState(keyCode, isDown == JNI_TRUE);
+	}
+	JNIEXPORT void JNICALL Java_com_samp_mobile_game_SAMP_setMouseButtonState(JNIEnv *pEnv, jobject thiz, jint buttonState)
+	{
+		SetMouseButtonState(buttonState);
+	}
+	JNIEXPORT void JNICALL Java_com_samp_mobile_game_SAMP_setMouseWheelDirection(JNIEnv *pEnv, jobject thiz, jint direction)
+	{
+		SetMouseWheelDirection(direction);
 	}
 	JNIEXPORT void JNICALL Java_com_samp_mobile_game_SAMP_onEventBackPressed(JNIEnv *pEnv, jobject thiz)
 	{

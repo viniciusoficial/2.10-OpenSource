@@ -2,7 +2,11 @@ package com.samp.mobile.game;
 
 import android.os.Bundle;
 import android.util.Log;
+import android.view.InputDevice;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
+import android.view.SurfaceView;
+import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Toast;
 
@@ -17,6 +21,8 @@ import com.samp.mobile.launcher.util.SignatureChecker;
 
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.Set;
 @Obfuscate
 public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightProvider.HeightListener {
     private static final String TAG = "SAMP";
@@ -28,6 +34,10 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
 
     private AttachEdit mAttachEdit;
     private LoadingScreen mLoadingScreen;
+    private final Set<Integer> mPressedKeys = new HashSet<>();
+    private boolean mMouseLookTouchStarted;
+    private float mMouseLookX;
+    private float mMouseLookY;
 
     public native void sendDialogResponse(int i, int i2, int i3, byte[] str);
 
@@ -189,6 +199,12 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
 
         instance = this;
 
+        SurfaceView surfaceView = GetSurfaceView();
+        if (surfaceView != null) {
+            surfaceView.setOnCapturedPointerListener(this::onCapturedPointerEvent);
+            surfaceView.setOnGenericMotionListener(this::onGenericMotionEvent);
+        }
+
         try {
             initializeSAMP();
         } catch (UnsatisfiedLinkError e5) {
@@ -198,6 +214,9 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
     }
 
     private native void initializeSAMP();
+    private native void setKeyboardKeyState(int keyCode, boolean isDown);
+    private native void setMouseButtonState(int buttonState);
+    private native void setMouseWheelDirection(int direction);
 
 
 
@@ -230,6 +249,14 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_ESCAPE && isMouseCaptured()) {
+            releaseMouseCapture();
+            return true;
+        }
+        if (isGameInputActive()) {
+            mPressedKeys.add(keyCode);
+            setKeyboardKeyState(keyCode, true);
+        }
         if(keyCode == KeyEvent.KEYCODE_BACK)
         {
             onEventBackPressed();
@@ -238,9 +265,105 @@ public class SAMP extends GTASA implements CustomKeyboard.InputListener, HeightP
     }
 
     @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        mPressedKeys.remove(keyCode);
+        setKeyboardKeyState(keyCode, false);
+        return super.onKeyUp(keyCode, event);
+    }
+
+    @Override
+    public boolean onTouch(View view, MotionEvent event) {
+        if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+            boolean handled = super.onTouch(view, event);
+            setMouseButtonState(event.getButtonState());
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN && isGameInputActive()) {
+                view.requestPointerCapture();
+            }
+            return handled;
+        }
+        return super.onTouch(view, event);
+    }
+
+    private boolean onCapturedPointerEvent(View view, MotionEvent event) {
+        setMouseButtonState(event.getButtonState());
+
+        if (!mMouseLookTouchStarted) {
+            mMouseLookX = view.getWidth() / 2.0f;
+            mMouseLookY = view.getHeight() / 2.0f;
+            sendMouseLookTouch(MotionEvent.ACTION_DOWN);
+            mMouseLookTouchStarted = true;
+        }
+
+        if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+            mMouseLookX = Math.max(0, Math.min(view.getWidth(),
+                    mMouseLookX + event.getAxisValue(MotionEvent.AXIS_RELATIVE_X)));
+            mMouseLookY = Math.max(0, Math.min(view.getHeight(),
+                    mMouseLookY + event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)));
+            sendMouseLookTouch(MotionEvent.ACTION_MOVE);
+        }
+        return true;
+    }
+
+    private boolean onGenericMotionEvent(View view, MotionEvent event) {
+        if (event.isFromSource(InputDevice.SOURCE_MOUSE) &&
+                event.getActionMasked() == MotionEvent.ACTION_SCROLL) {
+            setMouseWheelDirection((int) Math.signum(event.getAxisValue(MotionEvent.AXIS_VSCROLL)));
+            return true;
+        }
+        return false;
+    }
+
+    private void sendMouseLookTouch(int action) {
+        customMultiTouchEvent(action, 2, 0, 0, 0, 0, (int) mMouseLookX, (int) mMouseLookY);
+    }
+
+    private boolean isMouseCaptured() {
+        SurfaceView surfaceView = GetSurfaceView();
+        return surfaceView != null && surfaceView.hasPointerCapture();
+    }
+
+    private void releaseMouseCapture() {
+        SurfaceView surfaceView = GetSurfaceView();
+        if (surfaceView != null && surfaceView.hasPointerCapture()) {
+            surfaceView.releasePointerCapture();
+        }
+        stopMouseInput();
+    }
+
+    private void stopMouseInput() {
+        setMouseButtonState(0);
+        if (mMouseLookTouchStarted) {
+            sendMouseLookTouch(MotionEvent.ACTION_UP);
+            mMouseLookTouchStarted = false;
+        }
+    }
+
+    private boolean isGameInputActive() {
+        return (mKeyboard == null || !mKeyboard.IsShowing()) &&
+                (mDialog == null || !mDialog.isShow);
+    }
+
+    private void clearHardwareKeyboardState() {
+        for (int keyCode : mPressedKeys) {
+            setKeyboardKeyState(keyCode, false);
+        }
+        mPressedKeys.clear();
+    }
+
+    @Override
     public void onPause() {
         Log.i(TAG, "**** onPause");
+        clearHardwareKeyboardState();
+        releaseMouseCapture();
         super.onPause();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus) {
+            releaseMouseCapture();
+        }
     }
 
     @Override
